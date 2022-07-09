@@ -1,11 +1,11 @@
 const { Given, When, Then } = require('@cucumber/cucumber');
 const assert = require('assert');
-const { Console } = require('console');
+const { Console, count } = require('console');
 const RESERVE_OUTPUT_FIELD = {
     EmptyStr: '""',
     nullStr: 'null',
 }
-
+/*Given Step definitions*/ 
  
 Given("I set host and endpoint for test", function () {
     this.host = "https://l761dniu80.execute-api.us-east-2.amazonaws.com";
@@ -29,6 +29,16 @@ Given(/^I set (.*) body parameter (.*) with value: (.*)$/, function (param_type,
     this.data[param] = converted_param_value in RESERVE_OUTPUT_FIELD ? RESERVE_OUTPUT_FIELD[converted_param_value] : converted_param_value;
 });
 
+Given(/^I set body parameter (.*) as plain text with value: (.*)$/, function (param, param_value) {
+
+    if(!this.data){
+        this.data = "?"+ param + "=" + (param_value in RESERVE_OUTPUT_FIELD ? RESERVE_OUTPUT_FIELD[param_value] : param_value);
+    }
+    else{
+        this.data += "&"+ param + "=" + (param_value in RESERVE_OUTPUT_FIELD ? RESERVE_OUTPUT_FIELD[param_value] : param_value);
+    }
+});
+
 Given(/^I set header parameter (.*) with value: (.*)$/, function (param, param_value) {
     if(!this.headers){
         this.headers = {};
@@ -36,6 +46,8 @@ Given(/^I set header parameter (.*) with value: (.*)$/, function (param, param_v
 
     this.headers[param] = param_value;
 });
+
+/*When Step definitions*/ 
 
 When('I submit the request', async function(){
     if(this.data && this.headers){
@@ -62,6 +74,7 @@ When('I submit {int} the request with incremental value and main_key values', as
     }
 });
 
+
 When('I submit multiple requests for record deletion',  {timeout: 2 * 5000}, async function(){
     if(typeof this.delete_records !== 'undefined' && this.delete_records.length > 0){
         var headers = {'Content-type': 'application/json'};
@@ -80,9 +93,12 @@ When('I submit multiple requests for record deletion',  {timeout: 2 * 5000}, asy
     }
 });
  
+/*Then Step definitions*/ 
+
 Then('I receive status code {int}', function (status_code) {
     assert.equal(this.status_code, status_code, "Status codes are not equal!");
 });
+
 
 Then('Verify that response returned is list of objects with parameters value and main_key', function () {
     assert.ok(this.response.length > 0, "Empty list")
@@ -95,20 +111,24 @@ Then('Verify that response returned is list of objects with parameters value and
     });
 });
 
+
 Then('I want to store this value for deletion', function () {
     if(this.response.length > 0){
         this.delete_records = this.response;
     }
 });
 
+
 Then(/^Expect response field (.*) with value: (.*)$/, function (param, param_value) {
     param_value = param_value in RESERVE_OUTPUT_FIELD ? RESERVE_OUTPUT_FIELD[param_value] : param_value;
     assert.equal(this.response[param], param_value, "Parameter values do not match");
 });
 
+
 Then("Expect response to not return added record", function () {
     assert.ok(Object.keys(this.response) == ["value", "main_key"], "Record for value and main_key has been inserted.");
 });
+
 
 Then(/^I receive multiple status codes: (.*)$/, function (status_codes) {
     status_codes = status_codes.split(",")
@@ -117,30 +137,77 @@ Then(/^I receive multiple status codes: (.*)$/, function (status_codes) {
     }
 });
 
+
+Then(/^Expect record with (.*): (.*), and it contains (.*) param with value: (.*)$/, function (key_to_get, key_to_get_value, param_to_check, param_to_check_value) {
+
+    count = 0;
+
+    this.response.forEach(function(item){
+        if(item[key_to_get] === key_to_get_value){
+            assert.equal(item[param_to_check], param_to_check_value, "Parameter does not equal!");
+            count++;
+        }
+    });
+
+    assert.ok(count === 0, "There were multiple records with same key")
+});
+
+
+Then(/^Do not expect record with (.*): (.*)$/, function (key_to_get, key_to_get_value) {
+    this.response.forEach(function(item){
+        assert.notEqual(item[key_to_get], key_to_get_value, "Parameter has been found and not deleted!");
+    });
+});
+
+
+/*Helper functions*/ 
+
 async function submit_request(host, endpoint, http_method, headers = { 'default': 'default' }, data = { default: 'default' }){
     var status_code = "";
     var response = "";
     var url = host+endpoint;
-    console.log("this is a body" + JSON.stringify(data));
     switch(http_method){
         case "GET":
-            console.log("running get method request")
             var request = await fetch(url, {
                 method: http_method
             });
             status_code = request.status;
             response = await (request).json();
             break;
+        case "Query_param_POST":
+            var request = await fetch(url + data, {
+                method: "POST",
+                headers: headers
+            });
+            status_code = request.status;
+            response = status_code == 200 ? await (request).json() : null;
+            break;
+
+        case "Query_param_PUT":
+            var request = await fetch(url + data, {
+                method: "PUT",
+                headers: headers
+            });
+            status_code = request.status;
+            response = status_code == 200 ? await (request).json() : null;
+            break;
+
+        case "Query_param_DELETE":
+            var request = await fetch(url + data, {
+                method: "DELETE",
+                headers: headers
+            });
+            status_code = request.status;
+            response = status_code == 200 ? await (request).json() : null;
+            break;
         default:
-            console.log("running default for " + http_method + " method request")
             var request = await fetch(url, {
                 method: http_method,
                 headers: headers,
-                body: JSON.stringify(data)
+                body: !headers || headers["Content-type"] == "application/json" ? JSON.stringify(data) : data
             });
             status_code = request.status;
-            response = await (request).json();
-            console.log(JSON.stringify(response));
+            response = status_code == 200 ? await (request).json() : null;
             break;
     }
     return [status_code, response];
